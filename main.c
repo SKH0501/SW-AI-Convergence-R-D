@@ -1,6 +1,7 @@
 #include "pthread_pool.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 void task(void* arg) {
     int num = *(int*)arg;
@@ -13,7 +14,7 @@ int main() {
     pthread_pool_init(&pool, 4, 10);
 
     for (int i = 0; i < 5; i++) {
-        int* arg = malloc(sizeof(int));
+        int* arg = (int*)malloc(sizeof(int));
         *arg = i;
         pthread_pool_submit(&pool, task, arg, 0);
     }

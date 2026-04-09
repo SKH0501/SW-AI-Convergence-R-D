@@ -42,8 +42,15 @@ typedef struct {
  * mutex는 대기열을 조회하거나 변경하기 위해 사용하는 상호배타 락이다.
  * full과 empty는 대기열에 작업이 채워지기를 또는 빈 자리가 생기기를 기다리는 조건 변수이다.
  */
+typedef enum {
+    ON,
+    OFF,
+    STANDBY
+} pool_state_t;
+
+
 typedef struct {
-    enum {ON,OFF,STANDBY} state; /* 실행, 종료, 대기 등 스레드풀의 현재 상태 */
+    pool_state_t state; /* 실행, 종료, 대기 등 스레드풀의 현재 상태 */
     task_t *q;                   /* FIFO 작업 대기열로 사용할 원형 버퍼 */
     int q_size;                  /* 원형 버퍼 q 배열의 크기 */
     int q_front;                 /* 대기열에서 다음에 실행될 작업의 위치 */

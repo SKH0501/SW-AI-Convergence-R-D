@@ -79,11 +79,11 @@ int pthread_pool_init(pthread_pool_t *pool, size_t bee_size, size_t queue_size)
     }
 
     /* 3) 메모리 할당: 작업 큐(q)와 일꾼 스레드 배열(bee) */
-    pool->q = malloc(sizeof(task_t) * queue_size);
+    pool->q = (task_t*)malloc(sizeof(task_t) * queue_size);
     if (pool->q == NULL) {
         return POOL_FAIL;
     }
-    pool->bee = malloc(sizeof(pthread_t) * bee_size);
+    pool->bee = (pthread_t*)malloc(sizeof(pthread_t) * bee_size);
     if (pool->bee == NULL) {
         free(pool->q);
         return POOL_FAIL;
