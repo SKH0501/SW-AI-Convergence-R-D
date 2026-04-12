@@ -20,7 +20,5 @@ int main() {
 
     sleep(1);
 
-    pool.shutdown(POOL_COMPLETE);
-
     return 0;
 }
