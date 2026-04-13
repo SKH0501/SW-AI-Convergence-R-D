@@ -3,46 +3,52 @@
 
 #include <pthread.h>
 #include <cstddef>
+#include <vector>
 
 #define POOL_WAIT 3
 #define POOL_NOWAIT 4
 #define POOL_DISCARD 5
 #define POOL_COMPLETE 6
 
-typedef struct {
-    void (*function)(void *param);
-    void *param;
-} task_t;
+struct Task {
+    void (*function)(void* param) = nullptr;
+    void* param = nullptr;
+};
 
-typedef enum {
+enum PoolState {
     ON,
     OFF,
     STANDBY
-} pool_state_t;
+};
 
 class ThreadPool {
 private:
-    pool_state_t state;
+    PoolState state;
 
-    task_t* q;
     int q_size;
     int q_front;
     int q_len;
+    std::vector<Task> q;
 
-    pthread_t* bee;
     int bee_size;
+    std::vector<pthread_t> bee;
 
     pthread_mutex_t mutex;
     pthread_cond_t full;
     pthread_cond_t empty;
 
+    bool is_shutdown;
+
     static void* worker(void* param);
 
 public:
-    ThreadPool(size_t bee_size, size_t queue_size);
+    explicit ThreadPool(std::size_t bee_size, std::size_t queue_size);
     ~ThreadPool();
 
-    int submit(void (*f)(void *p), void *p, int flag);
+    ThreadPool(const ThreadPool&) = delete;
+    ThreadPool& operator=(const ThreadPool&) = delete;
+
+    int submit(void (*f)(void* p), void* p, int flag);
     int shutdown(int how);
 };
 

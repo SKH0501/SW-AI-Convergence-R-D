@@ -12,13 +12,12 @@ void task(void* arg) {
 int main() {
     ThreadPool pool(4, 10);
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 5; ++i) {
         int* arg = (int*)malloc(sizeof(int));
         *arg = i;
         pool.submit(task, arg, POOL_WAIT);
     }
 
     sleep(1);
-
     return 0;
 }

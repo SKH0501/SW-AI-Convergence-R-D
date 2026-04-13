@@ -1,18 +1,21 @@
 #include "ThreadPool.h"
-#include <cstdlib>
+
+#include <algorithm>
+#include <stdexcept>
 
 void* ThreadPool::worker(void* param) {
-    ThreadPool* pool = (ThreadPool*)param;
-    task_t t;
+    auto* pool = static_cast<ThreadPool*>(param);
+    Task t{};
 
-    while (1) {
+    while (true) {
         pthread_mutex_lock(&pool->mutex);
 
         while (pool->q_len == 0 && pool->state == ON) {
             pthread_cond_wait(&pool->full, &pool->mutex);
         }
 
-        if (pool->state == OFF || (pool->state == STANDBY && pool->q_len == 0)) {
+        if (pool->state == OFF ||
+            (pool->state == STANDBY && pool->q_len == 0)) {
             pthread_mutex_unlock(&pool->mutex);
             break;
         }
@@ -27,40 +30,60 @@ void* ThreadPool::worker(void* param) {
         (t.function)(t.param);
     }
 
-    pthread_exit(NULL);
-    return NULL;
+    return nullptr;
 }
 
-ThreadPool::ThreadPool(size_t bee_size, size_t queue_size) {
-    if (queue_size < bee_size) {
-        queue_size = bee_size;
+ThreadPool::ThreadPool(std::size_t bee_size_arg, std::size_t queue_size_arg)
+    : state(ON),
+      q_size(static_cast<int>(std::max(bee_size_arg, queue_size_arg))),
+      q_front(0),
+      q_len(0),
+      q(q_size),
+      bee_size(static_cast<int>(bee_size_arg)),
+      bee(bee_size),
+      is_shutdown(false)
+{
+    if (pthread_mutex_init(&mutex, nullptr) != 0) {
+        throw std::runtime_error("pthread_mutex_init failed");
+    }
+    if (pthread_cond_init(&full, nullptr) != 0) {
+        pthread_mutex_destroy(&mutex);
+        throw std::runtime_error("pthread_cond_init(full) failed");
+    }
+    if (pthread_cond_init(&empty, nullptr) != 0) {
+        pthread_cond_destroy(&full);
+        pthread_mutex_destroy(&mutex);
+        throw std::runtime_error("pthread_cond_init(empty) failed");
     }
 
-    state = ON;
+    int created = 0;
+    try {
+        for (int i = 0; i < bee_size; ++i) {
+            if (pthread_create(&bee[i], nullptr, worker, this) != 0) {
+                throw std::runtime_error("pthread_create failed");
+            }
+            ++created;
+        }
+    } catch (...) {
+        state = OFF;
+        pthread_cond_broadcast(&full);
+        pthread_cond_broadcast(&empty);
 
-    this->bee_size = bee_size;
-    q_size = queue_size;
+        for (int i = 0; i < created; ++i) {
+            pthread_join(bee[i], nullptr);
+        }
 
-    q_front = 0;
-    q_len = 0;
-
-    q = (task_t*)malloc(sizeof(task_t) * q_size);
-    bee = (pthread_t*)malloc(sizeof(pthread_t) * bee_size);
-
-    pthread_mutex_init(&mutex, NULL);
-    pthread_cond_init(&full, NULL);
-    pthread_cond_init(&empty, NULL);
-
-    for (size_t i = 0; i < bee_size; i++) {
-        pthread_create(&bee[i], NULL, worker, this);
+        pthread_cond_destroy(&empty);
+        pthread_cond_destroy(&full);
+        pthread_mutex_destroy(&mutex);
+        throw;
     }
 }
-
 ThreadPool::~ThreadPool() {
     shutdown(POOL_COMPLETE);
 }
 
-int ThreadPool::submit(void (*f)(void *p), void *p, int flag) {
+int ThreadPool::submit(void (*f)(void* p), void* p, int flag) {
     pthread_mutex_lock(&mutex);
 
     if (state != ON) {
@@ -84,7 +107,7 @@ int ThreadPool::submit(void (*f)(void *p), void *p, int flag) {
         }
     }
 
-    int pos = (q_front + q_len) % q_size;
+    const int pos = (q_front + q_len) % q_size;
     q[pos].function = f;
     q[pos].param = p;
     q_len++;
@@ -98,23 +121,26 @@ int ThreadPool::submit(void (*f)(void *p), void *p, int flag) {
 int ThreadPool::shutdown(int how) {
     pthread_mutex_lock(&mutex);
 
-    if (how == POOL_DISCARD) {
-        state = OFF;
-    } else {
-        state = STANDBY;
+    if (is_shutdown) {
+        pthread_mutex_unlock(&mutex);
+        return 0;
     }
+
+    is_shutdown = true;
+    state = (how == POOL_DISCARD) ? OFF : STANDBY;
 
     pthread_cond_broadcast(&full);
     pthread_cond_broadcast(&empty);
-
     pthread_mutex_unlock(&mutex);
 
-    for (int i = 0; i < bee_size; i++) {
-        pthread_join(bee[i], NULL);
+    for (int i = 0; i < bee_size; ++i) {
+        pthread_join(bee[i], nullptr);
     }
 
-    free(q);
-    free(bee);
+    // 지금은 destroy 생략해서 안정성 우선
+    // pthread_cond_destroy(&empty);
+    // pthread_cond_destroy(&full);
+    // pthread_mutex_destroy(&mutex);
 
     return 0;
 }
