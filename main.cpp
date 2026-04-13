@@ -1,20 +1,18 @@
 #include "ThreadPool.h"
 #include <cstdio>
-#include <cstdlib>
 #include <unistd.h>
 
 void task(void* arg) {
-    int num = *(int*)arg;
-    printf("Task %d executed\n", num);
-    free(arg);
+    int num = *static_cast<int*>(arg);
+    std::printf("Task %d executed\n", num);
+    delete static_cast<int*>(arg);
 }
 
 int main() {
     ThreadPool pool(4, 10);
 
     for (int i = 0; i < 5; ++i) {
-        int* arg = (int*)malloc(sizeof(int));
-        *arg = i;
+        int* arg = new int(i);
         pool.submit(task, arg, POOL_WAIT);
     }
 

@@ -41,15 +41,16 @@ ThreadPool::ThreadPool(std::size_t bee_size_arg, std::size_t queue_size_arg)
       q(q_size),
       bee_size(static_cast<int>(bee_size_arg)),
       bee(bee_size),
-      is_shutdown(false)
-{
+      is_shutdown(false) {
     if (pthread_mutex_init(&mutex, nullptr) != 0) {
         throw std::runtime_error("pthread_mutex_init failed");
     }
+
     if (pthread_cond_init(&full, nullptr) != 0) {
         pthread_mutex_destroy(&mutex);
         throw std::runtime_error("pthread_cond_init(full) failed");
     }
+
     if (pthread_cond_init(&empty, nullptr) != 0) {
         pthread_cond_destroy(&full);
         pthread_mutex_destroy(&mutex);
@@ -79,6 +80,7 @@ ThreadPool::ThreadPool(std::size_t bee_size_arg, std::size_t queue_size_arg)
         throw;
     }
 }
+
 ThreadPool::~ThreadPool() {
     shutdown(POOL_COMPLETE);
 }
@@ -137,10 +139,9 @@ int ThreadPool::shutdown(int how) {
         pthread_join(bee[i], nullptr);
     }
 
-    // 지금은 destroy 생략해서 안정성 우선
-    // pthread_cond_destroy(&empty);
-    // pthread_cond_destroy(&full);
-    // pthread_mutex_destroy(&mutex);
+    pthread_cond_destroy(&empty);
+    pthread_cond_destroy(&full);
+    pthread_mutex_destroy(&mutex);
 
     return 0;
 }
