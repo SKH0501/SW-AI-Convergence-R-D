@@ -49,8 +49,6 @@ private:
     pthread_mutex_t mutex;
     pthread_cond_t full;
     pthread_cond_t empty;
-
-    // wait_all용 조건변수
     pthread_cond_t all_done;
 
     bool is_shutdown;
@@ -71,6 +69,8 @@ public:
 
     void wait_all();
     void reset_counter();
+
+    int get_queue_length();
 
     int shutdown(int how);
 };

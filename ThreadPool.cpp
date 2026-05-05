@@ -45,6 +45,7 @@ void* ThreadPool::worker(void* param) {
         }
 
         pthread_mutex_lock(&pool->mutex);
+
         pool->completed_count++;
 
         if (pool->completed_count == pool->submitted_count) {
@@ -97,10 +98,12 @@ ThreadPool::ThreadPool(std::size_t bee_size_arg, std::size_t queue_size_arg)
             if (pthread_create(&bee[i], nullptr, worker, this) != 0) {
                 throw std::runtime_error("pthread_create failed");
             }
+
             ++created;
         }
     } catch (...) {
         state = OFF;
+
         pthread_cond_broadcast(&full);
         pthread_cond_broadcast(&empty);
         pthread_cond_broadcast(&all_done);
@@ -113,6 +116,7 @@ ThreadPool::ThreadPool(std::size_t bee_size_arg, std::size_t queue_size_arg)
         pthread_cond_destroy(&empty);
         pthread_cond_destroy(&full);
         pthread_mutex_destroy(&mutex);
+
         throw;
     }
 }
@@ -150,11 +154,12 @@ int ThreadPool::submit(void (*f)(void* p), void* p, int flag, TaskMetric* metric
     }
 
     const int pos = (q_front + q_len) % q_size;
+
     q[pos].function = f;
     q[pos].param = p;
     q[pos].metric = metric;
-    q_len++;
 
+    q_len++;
     submitted_count++;
 
     pthread_cond_signal(&full);
@@ -175,9 +180,21 @@ void ThreadPool::wait_all() {
 
 void ThreadPool::reset_counter() {
     pthread_mutex_lock(&mutex);
+
     submitted_count = 0;
     completed_count = 0;
+
     pthread_mutex_unlock(&mutex);
+}
+
+int ThreadPool::get_queue_length() {
+    pthread_mutex_lock(&mutex);
+
+    int current_q_len = q_len;
+
+    pthread_mutex_unlock(&mutex);
+
+    return current_q_len;
 }
 
 int ThreadPool::shutdown(int how) {
@@ -194,6 +211,7 @@ int ThreadPool::shutdown(int how) {
     pthread_cond_broadcast(&full);
     pthread_cond_broadcast(&empty);
     pthread_cond_broadcast(&all_done);
+
     pthread_mutex_unlock(&mutex);
 
     for (int i = 0; i < bee_size; ++i) {
