@@ -2,6 +2,13 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <chrono>
+
+static long long now_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()
+    ).count();
+}
 
 void* ThreadPool::worker(void* param) {
     auto* pool = static_cast<ThreadPool*>(param);
@@ -27,7 +34,24 @@ void* ThreadPool::worker(void* param) {
         pthread_cond_signal(&pool->empty);
         pthread_mutex_unlock(&pool->mutex);
 
+        if (t.metric != nullptr) {
+            t.metric->start_time_ns = now_ns();
+        }
+
         (t.function)(t.param);
+
+        if (t.metric != nullptr) {
+            t.metric->end_time_ns = now_ns();
+        }
+
+        pthread_mutex_lock(&pool->mutex);
+        pool->completed_count++;
+
+        if (pool->completed_count == pool->submitted_count) {
+            pthread_cond_signal(&pool->all_done);
+        }
+
+        pthread_mutex_unlock(&pool->mutex);
     }
 
     return nullptr;
@@ -41,7 +65,9 @@ ThreadPool::ThreadPool(std::size_t bee_size_arg, std::size_t queue_size_arg)
       q(q_size),
       bee_size(static_cast<int>(bee_size_arg)),
       bee(bee_size),
-      is_shutdown(false) {
+      is_shutdown(false),
+      submitted_count(0),
+      completed_count(0) {
     if (pthread_mutex_init(&mutex, nullptr) != 0) {
         throw std::runtime_error("pthread_mutex_init failed");
     }
@@ -57,7 +83,15 @@ ThreadPool::ThreadPool(std::size_t bee_size_arg, std::size_t queue_size_arg)
         throw std::runtime_error("pthread_cond_init(empty) failed");
     }
 
+    if (pthread_cond_init(&all_done, nullptr) != 0) {
+        pthread_cond_destroy(&empty);
+        pthread_cond_destroy(&full);
+        pthread_mutex_destroy(&mutex);
+        throw std::runtime_error("pthread_cond_init(all_done) failed");
+    }
+
     int created = 0;
+
     try {
         for (int i = 0; i < bee_size; ++i) {
             if (pthread_create(&bee[i], nullptr, worker, this) != 0) {
@@ -69,11 +103,13 @@ ThreadPool::ThreadPool(std::size_t bee_size_arg, std::size_t queue_size_arg)
         state = OFF;
         pthread_cond_broadcast(&full);
         pthread_cond_broadcast(&empty);
+        pthread_cond_broadcast(&all_done);
 
         for (int i = 0; i < created; ++i) {
             pthread_join(bee[i], nullptr);
         }
 
+        pthread_cond_destroy(&all_done);
         pthread_cond_destroy(&empty);
         pthread_cond_destroy(&full);
         pthread_mutex_destroy(&mutex);
@@ -85,7 +121,11 @@ ThreadPool::~ThreadPool() {
     shutdown(POOL_COMPLETE);
 }
 
-int ThreadPool::submit(void (*f)(void* p), void* p, int flag) {
+int ThreadPool::submit(void (*f)(void* p), void* p, int flag, TaskMetric* metric) {
+    if (metric != nullptr) {
+        metric->submit_time_ns = now_ns();
+    }
+
     pthread_mutex_lock(&mutex);
 
     if (state != ON) {
@@ -112,12 +152,32 @@ int ThreadPool::submit(void (*f)(void* p), void* p, int flag) {
     const int pos = (q_front + q_len) % q_size;
     q[pos].function = f;
     q[pos].param = p;
+    q[pos].metric = metric;
     q_len++;
+
+    submitted_count++;
 
     pthread_cond_signal(&full);
     pthread_mutex_unlock(&mutex);
 
     return 0;
+}
+
+void ThreadPool::wait_all() {
+    pthread_mutex_lock(&mutex);
+
+    while (completed_count < submitted_count) {
+        pthread_cond_wait(&all_done, &mutex);
+    }
+
+    pthread_mutex_unlock(&mutex);
+}
+
+void ThreadPool::reset_counter() {
+    pthread_mutex_lock(&mutex);
+    submitted_count = 0;
+    completed_count = 0;
+    pthread_mutex_unlock(&mutex);
 }
 
 int ThreadPool::shutdown(int how) {
@@ -133,12 +193,14 @@ int ThreadPool::shutdown(int how) {
 
     pthread_cond_broadcast(&full);
     pthread_cond_broadcast(&empty);
+    pthread_cond_broadcast(&all_done);
     pthread_mutex_unlock(&mutex);
 
     for (int i = 0; i < bee_size; ++i) {
         pthread_join(bee[i], nullptr);
     }
 
+    pthread_cond_destroy(&all_done);
     pthread_cond_destroy(&empty);
     pthread_cond_destroy(&full);
     pthread_mutex_destroy(&mutex);
